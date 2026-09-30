@@ -3,7 +3,7 @@ import "./globals.css";
 
 export const metadata: Metadata = {
   title: "ResolveOps AI — Incident Command Center",
-  description: "An evidence-backed AI operations platform for triage, investigation, guarded actions, and evaluation.",
+  description: "A portfolio prototype that demonstrates a simulated incident-response workflow. Not for production operations.",
   icons: { icon: "/favicon.svg", shortcut: "/favicon.svg" },
 };
 

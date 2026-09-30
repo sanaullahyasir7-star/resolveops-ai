@@ -1,77 +1,50 @@
 # ResolveOps AI
 
-ResolveOps AI is a production-style incident response copilot. It turns noisy operational incident reports into a structured diagnosis, evidence-backed recommendations, an execution trace, and a human-approved action plan.
+An incident-response workbench portfolio project by Sanaullah Yasir. It shows a transparent triage flow: report intake, evidence review, suggested next steps, reviewer decision, and an activity history.
 
-## Live demo
+## Open the portfolio app
 
-[Open ResolveOps AI](https://resolveops-ai-sanaullah.sanuallah.chatgpt.site)
+[Launch ResolveOps AI on GitHub Pages](https://sanaullahyasir7-star.github.io/resolveops-ai/)
 
-## Why this project stands out
+The Pages app is a zero-cost browser application. It includes curated example cases and a deterministic keyword-rule triage flow for incidents you add. **It does not use an AI model.** User-added reports and review decisions are kept in local browser storage on that device; they are not uploaded or synchronized. The UI and README label sample data and rule-based results clearly.
 
-This is not a basic chatbot wrapper. The application demonstrates the engineering patterns used in real AI products:
+Never enter real customer information, credentials, security incidents, or production data. Suggested steps are prompts for human review, not operational advice. The app does not connect to monitoring tools or execute changes.
 
-- structured model outputs validated with Zod
-- evidence-linked recommendations
-- visible execution traces for observability
-- prompt-injection defenses around untrusted incident text
-- explicit human approval before operational actions
-- persistent incident and audit history
-- graceful demo-mode fallback when the model service is unavailable
+## Full-stack source
 
-## Product workflow
-
-1. Create an incident with severity, service, title, and diagnostic context.
-2. Run AI analysis to produce a diagnosis and recommended actions.
-3. Inspect the evidence and execution trace behind the result.
-4. Approve or reject the proposed action plan.
-5. Review the decision in the audit history.
-
-## Tech stack
-
-- Next.js 16, React 19, and TypeScript
-- Tailwind CSS and accessible UI components
-- OpenAI Responses API with structured output
-- Cloudflare Workers, D1, Drizzle ORM, and Vinext
-- Zod validation
+The repository also contains the full-stack source implementation built with React, TypeScript, Vinext, Cloudflare Workers and D1, Drizzle ORM, and the OpenAI Responses API. That server-backed version is **not what GitHub Pages runs**. It requires a trusted sign-in host, a provisioned D1 database, and server-side API secrets. The repository does not include credentials, and the source does not provide a general-purpose login system. Do not expose it publicly until those pieces are configured and reviewed.
 
 ## Local development
 
-Requirements: Node.js 22.13 or newer and pnpm 11.
+Requirements: Node.js 22.13+ and pnpm 11.
 
 ```bash
 pnpm install
-cp .env.example .env.local
 pnpm dev
 ```
 
-Add your OpenAI API key to `.env.local`:
+The local HTML portfolio app is `github-pages/index.html` and can also be opened directly in a browser. The full-stack app uses the configured framework runtime; its AI endpoint requires `OPENAI_API_KEY`, and database routes require the D1 binding plus trusted identity context. Never commit secrets.
 
-```dotenv
-OPENAI_API_KEY=your_key_here
-OPENAI_MODEL=gpt-5-mini
-```
-
-Never commit `.env.local` or any API key.
-
-## Quality checks
+## Checks
 
 ```bash
 pnpm lint
+pnpm test
+pnpm exec tsc --noEmit
 pnpm build
 ```
 
-## Architecture
+GitHub Actions runs these checks on pushes and pull requests to `main`. GitHub Pages publishes only the `github-pages/` folder.
 
-The browser sends incident data to server routes. The server applies input boundaries, calls the OpenAI Responses API, validates the structured response, and stores incident and audit events in D1. The UI renders the result with evidence, traceability, and an approval gate.
+## Scope and limits
 
-## Security notes
-
-- Incident text is always treated as untrusted data, not instructions.
-- Model output is parsed and validated before use.
-- API keys remain server-side.
-- Operational recommendations require explicit human approval.
-- The repository intentionally excludes local environment files and deployment secrets.
+- The local triage logic is keyword-based and is not AI.
+- Example incidents and service-health figures are illustrative, not measured.
+- Source API routes validate inputs and model output, but this is not a production security review.
+- Reviewer approval is recorded only; no external action is executed.
+- There is no connected observability, ticketing, or incident-management provider.
+- This project is not suitable for real incident response or sensitive data.
 
 ## License
 
-This project is provided as a portfolio demonstration. Add a license before reusing it in another product.
+No license has been added. All rights reserved unless the owner adds one.

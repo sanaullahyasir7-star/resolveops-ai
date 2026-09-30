@@ -1,23 +1,14 @@
 import { env } from "cloudflare:workers";
+import { headers } from "next/headers";
+import { and, eq } from "drizzle-orm";
+import { getDb } from "@/db";
+import { userIncidents } from "@/db/schema";
+import { analysisOutputSchema, canAccessIncident, incidentAnalysisInputSchema, retainQuotedEvidence } from "@/lib/validation";
 
 export const dynamic = "force-dynamic";
 
-type IncidentInput = {
-  id?: string;
-  title?: string;
-  customer?: string;
-  severity?: string;
-  source?: string;
-  summary?: string;
-  evidence?: Array<{ source?: string; detail?: string; relevance?: number }>;
-};
-
-type Analysis = {
-  summary: string;
-  confidence: number;
-  evidence: Array<{ source: string; detail: string; relevance: number }>;
-  actions: string[];
-};
+type IncidentInput = typeof incidentAnalysisInputSchema._output;
+type Analysis = typeof analysisOutputSchema._output;
 
 const analysisSchema = {
   type: "object",
@@ -48,15 +39,15 @@ const analysisSchema = {
 
 function cleanIncident(input: IncidentInput) {
   return {
-    id: input.id?.slice(0, 80) || "unknown",
-    title: input.title?.slice(0, 240) || "Untitled incident",
-    customer: input.customer?.slice(0, 120) || "Unknown",
-    severity: input.severity?.slice(0, 24) || "unknown",
-    source: input.source?.slice(0, 120) || "Unknown",
-    report: input.summary?.slice(0, 5000) || "No report supplied",
-    evidence: (input.evidence ?? []).slice(0, 8).map((item) => ({
-      source: item.source?.slice(0, 120) || "Unknown source",
-      detail: item.detail?.slice(0, 1000) || "No detail supplied",
+    id: input.id.slice(0, 80),
+    title: input.title.slice(0, 240),
+    customer: input.customer.slice(0, 120),
+    severity: input.severity.slice(0, 24),
+    source: input.source.slice(0, 120),
+    report: input.summary.slice(0, 5000),
+    evidence: input.evidence.slice(0, 8).map((item) => ({
+      source: item.source.slice(0, 120),
+      detail: item.detail.slice(0, 1000),
       relevance: Math.max(0, Math.min(100, Math.round(item.relevance ?? 0))),
     })),
   };
@@ -91,6 +82,10 @@ function normalizeAnalysis(value: Analysis): Analysis {
 }
 
 export async function POST(request: Request) {
+  const requestHeaders = await headers();
+  if (!requestHeaders.get("oai-authenticated-user-id")) {
+    return Response.json({ error: "Authentication required" }, { status: 401 });
+  }
   if (!env.OPENAI_API_KEY) {
     return Response.json(
       { code: "provider_not_configured", mode: "demo", error: "Live model provider is not configured" },
@@ -99,9 +94,33 @@ export async function POST(request: Request) {
   }
 
   try {
-    const input = cleanIncident(await request.json() as IncidentInput);
+    if (Number(request.headers.get("content-length") || 0) > 24_000) return Response.json({ error: "Request is too large" }, { status: 413 });
+    const rawBody = await request.text();
+    if (rawBody.length > 24_000) return Response.json({ error: "Request is too large" }, { status: 413 });
+    let json: unknown;
+    try { json = JSON.parse(rawBody); } catch { return Response.json({ error: "Invalid JSON" }, { status: 400 }); }
+    const parsedInput = incidentAnalysisInputSchema.safeParse(json);
+    if (!parsedInput.success) return Response.json({ error: "Invalid incident payload" }, { status: 400 });
+    let validatedInput = parsedInput.data;
+    const sampleIncidentIds = new Set(["INC-2841", "INC-2838", "INC-2834", "INC-2827"]);
+    if (!sampleIncidentIds.has(validatedInput.id)) {
+      const userId = requestHeaders.get("oai-authenticated-user-id");
+      const [stored] = await getDb().select().from(userIncidents).where(and(eq(userIncidents.id, validatedInput.id), eq(userIncidents.userId, userId!))).limit(1);
+      if (!stored || !canAccessIncident(userId, stored.userId)) return Response.json({ error: "Incident not found" }, { status: 404 });
+      validatedInput = {
+        ...validatedInput,
+        title: stored.title,
+        customer: stored.customer,
+        severity: "medium",
+        summary: stored.description,
+        evidence: [{ source: "Submitted report", detail: stored.description }],
+      };
+    }
+    const input = cleanIncident(validatedInput);
+    const timeout = AbortSignal.timeout(25_000);
     const providerResponse = await fetch("https://api.openai.com/v1/responses", {
       method: "POST",
+      signal: timeout,
       headers: {
         authorization: `Bearer ${env.OPENAI_API_KEY}`,
         "content-type": "application/json",
@@ -139,7 +158,16 @@ export async function POST(request: Request) {
     const text = outputText(providerData);
     if (!text) return Response.json({ code: "empty_model_output", error: "The live model returned no analysis" }, { status: 502 });
 
-    const analysis = normalizeAnalysis(JSON.parse(text) as Analysis);
+    let parsedOutput: unknown;
+    try { parsedOutput = JSON.parse(text); } catch { return Response.json({ code: "invalid_model_output", error: "The model returned invalid structured data" }, { status: 502 }); }
+    const validatedOutput = analysisOutputSchema.safeParse(parsedOutput);
+    if (!validatedOutput.success) return Response.json({ code: "invalid_model_output", error: "The model returned an invalid analysis shape" }, { status: 502 });
+    const analysis = normalizeAnalysis(validatedOutput.data);
+    const verifiedEvidence = retainQuotedEvidence(analysis.evidence, validatedInput.evidence);
+    if (!verifiedEvidence.length) {
+      return Response.json({ code: "ungrounded_model_output", error: "The model did not return verifiable evidence from the supplied incident." }, { status: 502 });
+    }
+    analysis.evidence = verifiedEvidence;
     return Response.json({ analysis, mode: "live", model: env.OPENAI_MODEL || "gpt-5-mini" });
   } catch (error) {
     console.error("Unable to analyze incident", error);
